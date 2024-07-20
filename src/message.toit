@@ -40,7 +40,9 @@ RESET            ::= 0xFF   //
 SYSEX-DATA       ::= 0x1000
 
 
-/** A MIDI message. */
+/** A MIDI message; basically a Plain Old Data Object.
+    Every message has a $type. The most common messages have a $channel, from 1 to 16.
+    Most messages have an $item they target (like a note or controller) and/or a $value. */
 class Message implements Comparable:
 
     /** Message type (see constants e.g. $NOTE-ON, $NOTE-OFF...) */
@@ -69,9 +71,9 @@ class Message implements Comparable:
     note -> Note:           return Note item
 
 
-    /** Constructs a new message. */
+    /** Constructs a new Message. */
     constructor .type/int --.item/int?=null --.value/int?=null:
-        if NAMES[type] == null: throw "Invalid MIDI Message type"
+        if NAMES_[type] == null: throw "Invalid MIDI Message type"
         time = Time.now
         //TODO: Validate item and value!
 
@@ -185,7 +187,7 @@ class Message implements Comparable:
 
     /** Human-readable description of the message. */
     stringify:
-        str := NAMES[type]
+        str := NAMES_[type]
         if type == NOTE-ON or type == NOTE-OFF or type == POLY-AFTERTOUCH:
             str += " $note"
         else if item != null:
@@ -212,7 +214,7 @@ class Message implements Comparable:
 
 
     /** A mapping from message types to names. */
-    static NAMES ::= {
+    static NAMES_ ::= {
         NOTE-OFF:       "NOTE-OFF",
         NOTE-ON:        "NOTE-ON",
         POLY-AFTERTOUCH:"POLY-AFTERTOUCH",

@@ -3,8 +3,6 @@
 
 import .message
 import .timed-queue
-import .timestamp
-import expect show *
 import gpio
 import io.reader
 import io.writer
@@ -13,8 +11,7 @@ import monitor
 import uart
 
 LOG ::= (log.default.with-level log.INFO-LEVEL).with-name "MIDI"
-
-TAGS_ ::= {"time": TIMESTAMP}
+TAGS_ ::= {"time": TIMESTAMP_}
 
 /** Represents a MIDI in/out connection, using any Reader/Writer stream pair. */
 class Port:
@@ -43,6 +40,7 @@ class Port:
         return msg
 
     /** Queues a message to be sent.
+
         If you set the message's `time` property to a future time, the message will be held
             and sent at that time. (Multiple future messages are sent in the order of their
             timestamps, not the order they were queued.) */

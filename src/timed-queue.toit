@@ -2,7 +2,6 @@
 // Use of this source code is governed by the Apache 2 license.
 
 import .message
-import .timestamp
 import log
 import monitor
 
@@ -17,7 +16,7 @@ class TimedQueue:
 
     /** Adds a Message to the queue. */
     send event/Message -> none:
-        log.debug "$TIMESTAMP Q: Enqueuing $event"
+        log.debug "$TIMESTAMP_ Q: Enqueuing $event"
         re-sort := (not events_.is-empty and (event.compare-to events_.last) <= 0)
         events_.add event
         if re-sort:
@@ -46,18 +45,26 @@ class TimedQueue:
             t := next-time
             if t == null:
                 // Wait for a notification that a Message has been pushed:
-                log.debug "$TIMESTAMP Q: Waiting on empty queue..."
+                log.debug "$TIMESTAMP_ Q: Waiting on empty queue..."
                 signal_.wait
             else:
                 // Check if the earliest Message is ready now, or how soon it will be ready:
                 delay := -(t.to-now)
                 if delay <= Duration.ZERO:
                     // It's ready! Remove & return it:
-                    log.debug "$TIMESTAMP Q: Got a message! (t=$t.ms-since-epoch) delay=$delay)"
+                    log.debug "$TIMESTAMP_ Q: Got a message! (t=$t.ms-since-epoch) delay=$delay)"
                     return events_.remove-first
                 // Wait for a notification that a Message has been pushed,
                 // but abort the wait when the current first Message is ready:
-                log.debug "$TIMESTAMP Q: Waiting $delay (until $t.ms-since-epoch) before next Message..."
+                log.debug "$TIMESTAMP_ Q: Waiting $delay (until $t.ms-since-epoch) before next Message..."
                 catch:
                     with-timeout delay:
                         signal_.wait
+
+
+
+class Timestamp_:
+    stringify -> string:
+        return "$(%7.3f (Time.now.ms-since-epoch / 1000.0))"
+
+TIMESTAMP_ ::= Timestamp_

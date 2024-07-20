@@ -1,7 +1,7 @@
 // Copyright 2024 Jens Alfke. All rights reserved.
 // Use of this source code is governed by the Apache 2 license.
 
-/** A musical note. Wrapper around a MIDI note number 0-127, where 0 is low C. */
+/** A musical note. Wrapper around a MIDI note number. */
 class Note:
 
     /** Constructs a Note from the MIDI note number (0..127).
