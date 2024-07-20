@@ -1,23 +1,24 @@
 // Copyright 2024 Jens Alfke. All rights reserved.
 // Use of this source code is governed by the Apache 2 license.
 
+import .logging as log
 import .message
 import .timed-queue
 import gpio
 import io.reader
 import io.writer
-import log
 import monitor
 import uart
-
-LOG ::= (log.default.with-level log.INFO-LEVEL).with-name "MIDI"
-TAGS_ ::= {"time": TIMESTAMP_}
 
 /** Represents a MIDI in/out connection, using any Reader/Writer stream pair. */
 class Port:
     /** Constructs a Port given a Reader and Writer. */
     constructor .in_/reader.Reader .out_/writer.Writer:
         task --background=true ::send-task_
+
+    /** If set to true, all incoming and outgoing messages will be logged.
+        This should only be used for debugging, as it slows everything down a lot. */
+    log-messages /bool := false
 
     /** Waits for the next message and returns it. */
     receive -> Message:
@@ -36,7 +37,7 @@ class Port:
                 else if not msg.allowed-in-sysex_:
                     // Ignore a non-real-time message during a Sysex dump
                     msg = null
-        LOG.info " ---> $msg" --tags=TAGS_
+        if log-messages: log.info " ---> $msg"
         return msg
 
     /** Queues a message to be sent.
@@ -55,16 +56,16 @@ class Port:
     send-now_ msg/Message -> none:
         if sysex-out_:
             if not msg.allowed-in-sysex_:
-                LOG.warn "MIDI message not allowed during a SYSEX dump: $msg"
+                log.warn "MIDI message not allowed during a SYSEX dump: $msg"
                 return
             if msg.type == SYSEX-END: sysex-out_ = false
         else:
             if not msg.allowed-outside-sysex_:
-                LOG.warn "MIDI message not allowed outside of a SYSEX dump: $msg"
+                log.warn "MIDI message not allowed outside of a SYSEX dump: $msg"
                 return
             if msg.type == SYSEX-BEGIN: sysex-out_ = true
         msg.write-to out_
-        LOG.info "<=== $msg" --tags=TAGS_
+        if log-messages: log.info "<=== $msg"
 
     in_ /reader.Reader ::= ?            // Input stream
     out_ /writer.Writer ::= ?           // Output stream

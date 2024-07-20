@@ -5,7 +5,6 @@ import .note
 import io
 import io.reader
 import io.writer
-import log
 
 //-------- MESSAGE TYPES
 
