@@ -8,35 +8,52 @@ import io.writer
 
 //-------- MESSAGE TYPES
 
-// CONSTANT                     ITEM        VALUE
+// CONSTANT                         ITEM        VALUE
 
 // Per-channel messages:
-NOTE-OFF         ::= 0x80   //  note#       velocity (usually 0)
-NOTE-ON          ::= 0x90   //  note#       velocity
-POLY-AFTERTOUCH  ::= 0xA0   //  note#       pressure
-CC               ::= 0xB0   //  controller  value
-PROGRAM-CHANGE   ::= 0xC0   //  program
-CHANNEL-PRESSURE ::= 0xD0   //              pressure (0..16383)
-PITCH-BEND       ::= 0xE0   //              bend (-8192..8191)
+NOTE-OFF            ::= 0x80    //  note#       velocity (usually 0)
+NOTE-ON             ::= 0x90    //  note#       velocity
+POLY-AFTERTOUCH     ::= 0xA0    //  note#       pressure
+CC                  ::= 0xB0    //  controller  value
+PROGRAM-CHANGE      ::= 0xC0    //  program
+CHANNEL-PRESSURE    ::= 0xD0    //              pressure (0..16383)
+PITCH-BEND          ::= 0xE0    //              bend (-8192..8191)
+
+RPN                 ::= 0x100   // controller   value  (both 0..16383)
+NRPN                ::= 0x110   // controller   value  (both 0..16383)
+
+// Channel mode messages (implemented as CC controllers 120..127)
+CHANNEL-MODE-BASE_  ::= 0x1C1
+SOUND-OFF           ::= 0x1C1
+RESET-CONTROLLERS   ::= 0x1C2
+LOCAL-CONTROL       ::= 0x1C3  //              0 off, 127 on
+NOTES-OFF           ::= 0x1C4
+OMNI-OFF            ::= 0x1C5
+OMNI-ON             ::= 0x1C6
+MONO-MODE           ::= 0x1C7  //              number of channels, 0 for all
+POLY-MODE           ::= 0x1C8
+CHANNEL-MODE-END_   ::= POLY-MODE
 
 // System messages: (no channel)
-SYSEX-BEGIN      ::= 0xF0   //  vendor-ID
-QUARTER-FRAME    ::= 0xF1   //  type        value
-SONG-POSITION    ::= 0xF2   //              position (0..16383)
-SONG-SELECT      ::= 0xF3   //  song
-TUNE-REQUEST     ::= 0xF6   //
-SYSEX-END        ::= 0xF7   //
+SYSTEM-BASE_        ::= 0xF0
+SYSEX-BEGIN         ::= 0xF0    //  vendor-ID
+QUARTER-FRAME       ::= 0xF1    //  type        value
+SONG-POSITION       ::= 0xF2    //              position (0..16383)
+SONG-SELECT         ::= 0xF3    //  song
+TUNE-REQUEST        ::= 0xF6    //
+SYSEX-END           ::= 0xF7    //
 
 // Real-time messages: (no channel; may occur during a sysex dump)
-TIMING-CLOCK     ::= 0xF8   //
-START            ::= 0xFA   //
-CONTINUE         ::= 0xFB   //
-STOP             ::= 0xFC   //
-ACTIVE-SENSING   ::= 0xFE   //
-RESET            ::= 0xFF   //
+REALTIME-BASE_      ::= 0xF8
+TIMING-CLOCK        ::= 0xF8
+START               ::= 0xFA
+CONTINUE            ::= 0xFB
+STOP                ::= 0xFC
+ACTIVE-SENSING      ::= 0xFE
+RESET               ::= 0xFF
 
 // Fake message type to represent data bytes sent between SYSEX-BEGIN and SYSEX-END
-SYSEX-DATA       ::= 0x1000
+SYSEX-DATA          ::= 0x1F4
 
 
 /** A MIDI message; basically a Plain Old Data Object.
@@ -62,9 +79,12 @@ class Message implements Comparable:
     /** Binary data of a $SYSEX-DATA message; part of a Sysex dump. Otherwise null. */
     data /ByteArray? ::= null
 
-    /** The time the message was received, or at which it should be sent. */
+    /** The time the message was received, or at which it should be sent.
+        Defaults to the time the Message object was constructed. */
     time /Time := ?
 
+    is-channel-message -> bool:         return (type & 0xFF) < SYSTEM-BASE_
+    is-system-message -> bool:          return not is-channel-message
 
     /** The Note of a $NOTE-ON, $NOTE-OFF or $POLY-AFTERTOUCH message. */
     note -> Note:           return Note item
@@ -104,12 +124,17 @@ class Message implements Comparable:
             if type != 0xF0:
                 // Channel messages:
                 channel = 1 + (b & 0x0F)
-                item = in.read-byte
+                item = read-data-byte_ in
                 if type == PROGRAM-CHANGE or type == CHANNEL-PRESSURE:
                     value = item
                     item = null
                 else:
-                    value = in.read-byte
+                    value = read-data-byte_ in
+                    if type == CC:
+                        if item >= 120:
+                            // Channel Mode Messages:
+                            type = CHANNEL-MODE-BASE_ + (item - 120)
+                            item = null
                     if type == PITCH-BEND:
                         // Combine 2 param bytes into one 14-bit number:
                         value = ((value << 7) | item) - 8192
@@ -119,19 +144,19 @@ class Message implements Comparable:
                 type = b // use entire byte as type
                 if type == SYSEX-BEGIN:
                     // Read manufacturer id, either 1 or 3 bytes:
-                    item = in.read-byte
+                    item = read-data-byte_ in
                     if item == 0:
-                        item = (in.read-byte << 8) | in.read-byte
+                        item = ((read-data-byte_ in) << 8) | (read-data-byte_ in)
                 else if type == QUARTER-FRAME:
-                    q := in.read-byte
+                    q := read-data-byte_ in
                     item = q >>> 4
                     value = q & 0x0F
                 else if type == SONG-POSITION:
-                    lsb := in.read-byte
-                    msb := in.read-byte
+                    lsb := read-data-byte_ in
+                    msb := read-data-byte_ in
                     value = (msb << 7) | lsb
                 else if type == SONG-SELECT:
-                    item = in.read-byte
+                    item = read-data-byte_ in
 
         else:
             // Byte is < 0x80 so this is data. Grab all available data bytes:
@@ -146,10 +171,12 @@ class Message implements Comparable:
 
     /** Writes a Message to a MIDI stream. */
     write-to out /writer.Writer:
-        if type == SYSEX-DATA:
-            // Data:
-            out.write data
-        else if type < 0xF0:
+        if type >= CHANNEL-MODE-BASE_ and type <= CHANNEL-MODE-END_:
+            // Channel mode messages (really CCs):
+            out.write-byte (CC | (channel - 1))
+            out.write-byte (type - CHANNEL-MODE-BASE_ + 120)
+            write-data-byte_ out value
+        else if is-channel-message:
             // Channel message:
             out.write-byte (type | (channel - 1))
             if type == PITCH-BEND:
@@ -159,6 +186,9 @@ class Message implements Comparable:
             else:
                 if item != null:   out.write-byte item
                 if value != null:  out.write-byte value
+        else if type == SYSEX-DATA:
+            // Data:
+            out.write data
         else:
             // System messages:
             out.write-byte type
@@ -235,3 +265,12 @@ class Message implements Comparable:
         RESET:          "RESET",
         SYSEX-DATA:     "SYSEX-DATA"
     }
+
+read-data-byte_ in/reader.Reader -> int:
+    b := in.read-byte
+    if b >= 0x80: throw "received invalid MIDI data byte $(%02x b)"
+    return b
+
+write-data-byte_ out/writer.Writer b/int:
+    if b < 0 or b >= 0x80: throw "invalid MIDI parameter (out of range 0..127)"
+    out.write-byte b
