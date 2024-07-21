@@ -40,10 +40,12 @@ SYSEX-BEGIN         ::= 0xF0    //  vendor-ID
 QUARTER-FRAME       ::= 0xF1    //  type        value
 SONG-POSITION       ::= 0xF2    //              position (0..16383)
 SONG-SELECT         ::= 0xF3    //  song
-TUNE-REQUEST        ::= 0xF6    //
-SYSEX-END           ::= 0xF7    //
+TUNE-REQUEST        ::= 0xF6
+SYSEX-END           ::= 0xF7
 
-// Real-time messages: (no channel; may occur during a sysex dump)
+SYSEX-DATA          ::= 0x1F4   //  `data` property contains the data
+
+// Real-time messages: (no channel; allowed during a sysex dump)
 REALTIME-BASE_      ::= 0xF8
 TIMING-CLOCK        ::= 0xF8
 START               ::= 0xFA
@@ -52,8 +54,6 @@ STOP                ::= 0xFC
 ACTIVE-SENSING      ::= 0xFE
 RESET               ::= 0xFF
 
-// Fake message type to represent data bytes sent between SYSEX-BEGIN and SYSEX-END
-SYSEX-DATA          ::= 0x1F4
 
 
 /** A MIDI message; basically a Plain Old Data Object.
@@ -62,7 +62,7 @@ SYSEX-DATA          ::= 0x1F4
 class Message implements Comparable:
 
     /** Message type (see constants e.g. $NOTE-ON, $NOTE-OFF...) */
-    type /int ::= ?
+    type /int
 
     /**  Channel number, 1-16 (for channel-specific messages.) */
     channel /int? := null

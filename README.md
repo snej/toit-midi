@@ -39,3 +39,9 @@ Alternatively you can attach the more common [3-pin 1/8" TRS jacks](https://www.
 Either way, you just need to wire up the power and ground, connect the data pin(s) to GPIO pins, and tell the UART which pins to use. As you can see in the photo and example code, I used pin 17 for MIDI out and pin 16 for MIDI in, as recommended in the `uart` package docs.
 
 If you want to run this on a desktop/laptop computer you'd think connecting would be simpler, but it's not. There are lots of MIDI interfaces available that plug into a USB port, but they identify themselves as MIDI interfaces, not regular serial ports. In my experience (on macOS) they don't show up as devices in `/dev`, so Toit can't [currently] connect. If anyone knows a workaround, please let me know!
+
+## References
+
+- [Official MIDI Specs](https://midi.org/specs) -- published by the MIDI Association. You'll need to register a free account to download these.
+- [MIDI CC & NRPN Database](https://midi.guide) -- documents the CC and NRPN numbers used by various hardware.
+- [minimidi.world](https://minimidi.world) -- guide to MIDI-over-TRS hardware support, and which devices are type A vs type B.
