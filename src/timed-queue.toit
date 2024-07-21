@@ -16,14 +16,14 @@ class TimedQueue:
 
     /** Adds a Message to the queue. */
     send event/Message -> none:
-        log.debug "Q: Enqueuing $event"
-        re-sort := (not events_.is-empty and (event.compare-to events_.last) <= 0)
-        events_.add event
-        if re-sort:
-            events_.sort --in-place=true : |a b| a.time.compare-to b.time
-        log.debug "       Q: $events_"
+        i/int := ?
+        //TODO: This could be optimized by using a priority queue aka heap.
+        for i = events_.size - 1; i >= 0; i--:
+            if (event.compare-to events_[i]) > 0:
+                break
+        events_.insert event --at=(i + 1)
+        log.debug "Q: Enqueued $event at $i"
         signal_.raise
-        //TODO: This method could be optimized by using a priority queue aka heap.
 
     /** The time of the next Message, or null if the queue is empty. */
     next-time -> Time?:
