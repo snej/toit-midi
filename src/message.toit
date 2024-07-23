@@ -36,7 +36,7 @@ CHANNEL-MODE-END_   ::= POLY-MODE
 
 // System messages: (no channel)
 SYSTEM-BASE_        ::= 0xF0
-SYSEX-BEGIN         ::= 0xF0    //  vendor-ID
+SYSEX-BEGIN         ::= 0xF0    //  `vendor` property has the vendor ID
 QUARTER-FRAME       ::= 0xF1    //  type        value
 SONG-POSITION       ::= 0xF2    //              position (0..16383)
 SONG-SELECT         ::= 0xF3    //  song
@@ -76,9 +76,6 @@ class Message implements Comparable:
         Generally 0..127, but pitch-bend is -8192..8191 and song position is 0..16383. */
     value /int? := null
 
-    /** Binary data of a $SYSEX-DATA message; part of a Sysex dump. Otherwise null. */
-    data /ByteArray? ::= null
-
     /** The time the message was received, or at which it should be sent.
         Defaults to the time the Message object was constructed. */
     time /Time := ?
@@ -92,81 +89,52 @@ class Message implements Comparable:
 
     /** Constructs a new Message. */
     constructor .type/int --.item/int?=null --.value/int?=null:
-        if NAMES_[type] == null: throw "Invalid MIDI Message type"
+        if NAMES_[type] == null:
+            throw "Invalid MIDI Message type"
+        if type == SYSEX-BEGIN or type == SYSEX-DATA:
+            throw "Sysex messages must have Message subclasses"
         time = Time.now
         //TODO: Validate item and value!
 
 
-    /** Constructs a new $SYSEX-DATA message. */
-    constructor --.data/ByteArray:
-        type = SYSEX-DATA
-        time = Time.now
-
-
-    /** Constructs an exact copy of another Message. */
     constructor.copy msg/Message:
         type = msg.type
         channel = msg.channel
         item = msg.item
         value = msg.value
-        data = msg.data
         time = msg.time
 
 
     /** Constructs a Message from bytes read from a MIDI stream. */
-    constructor.read in /reader.Reader:
-        b := in.peek-byte   // Wait for next byte...
-        time = Time.now
-        if b >= 0x80:
-            // Read a MIDI message:
-            b = in.read-byte
-            type = b & 0xF0
-            if type != 0xF0:
-                // Channel messages:
-                channel = 1 + (b & 0x0F)
-                item = read-data-byte_ in
-                if type == PROGRAM-CHANGE or type == CHANNEL-PRESSURE:
-                    value = item
-                    item = null
-                else:
-                    value = read-data-byte_ in
-                    if type == CC:
-                        if item >= 120:
-                            // Channel Mode Messages:
-                            type = CHANNEL-MODE-BASE_ + (item - 120)
-                            item = null
-                    if type == PITCH-BEND:
-                        // Combine 2 param bytes into one 14-bit number:
-                        value = ((value << 7) | item) - 8192
-                        item = null
+    constructor status/int --p1/int?=null --p2/int?=null --.time/Time:
+        if status < 0xF0:
+            // Channel messages:
+            type = status & 0xF0
+            channel = 1 + (status & 0x0F)
+            if type == PROGRAM-CHANGE or type == CHANNEL-PRESSURE:
+                value = p1
+            else if type == CC and p1 >= 120:
+                // Channel Mode Messages:
+                type = CHANNEL-MODE-BASE_ + (p1 - 120)
+                value = p2
+            else if type == PITCH-BEND:
+                // Combine 2 param bytes into one 14-bit number:
+                value = ((p2 << 7) | p1) - 8192
             else:
-                // System messages:
-                type = b // use entire byte as type
-                if type == SYSEX-BEGIN:
-                    // Read manufacturer id, either 1 or 3 bytes:
-                    item = read-data-byte_ in
-                    if item == 0:
-                        item = ((read-data-byte_ in) << 8) | (read-data-byte_ in)
-                else if type == QUARTER-FRAME:
-                    q := read-data-byte_ in
-                    item = q >>> 4
-                    value = q & 0x0F
-                else if type == SONG-POSITION:
-                    lsb := read-data-byte_ in
-                    msb := read-data-byte_ in
-                    value = (msb << 7) | lsb
-                else if type == SONG-SELECT:
-                    item = read-data-byte_ in
-
+                item = p1
+                value = p2
+                if type == NOTE-ON and p2 == 0:
+                    type = NOTE-OFF
         else:
-            // Byte is < 0x80 so this is data. Grab all available data bytes:
-            type = SYSEX-DATA
-            sz ::= in.buffered-size
-            len := 1
-            for ; len < sz; len++:
-                if (in.peek-byte len) >= 0x80:
-                    break
-            data = in.read-bytes len
+            // System messages:
+            type = status // use entire byte as type
+            if type == QUARTER-FRAME:
+                item = p1 >>> 4
+                value = p1 & 0x0F
+            else if type == SONG-POSITION:
+                value = (p2 << 7) | p1
+            else if type == SONG-SELECT:
+                item = p1
 
 
     /** Writes a Message to a MIDI stream. */
@@ -186,21 +154,10 @@ class Message implements Comparable:
             else:
                 if item != null:   out.write-byte item
                 if value != null:  out.write-byte value
-        else if type == SYSEX-DATA:
-            // Data:
-            out.write data
         else:
             // System messages:
             out.write-byte type
-            if type == SYSEX-BEGIN:
-                // Write manufacturer id, either 1 or 3 bytes:
-                if item <= 0xFF:
-                    out.write-byte item
-                else:
-                    out.write-byte 0x00
-                    out.write-byte (item >>> 8)
-                    out.write-byte (item & 0xFF)
-            else if type == QUARTER-FRAME:
+            if type == QUARTER-FRAME:
                 out.write-byte (item << 4) | value
             else if type == SONG-POSITION:
                 out.write-byte (value & 0x7F)
@@ -225,8 +182,6 @@ class Message implements Comparable:
             str += " = $value"
         if type < SYSEX-BEGIN:
             str += " (ch$channel)"
-        if data != null:
-            str += " <$data.size bytes>"
         //str += " @$(%.3f (time.ms-since-epoch / 1000.0))"
         return str
 
@@ -238,39 +193,83 @@ class Message implements Comparable:
         return time.compare-to other.time --if-equal=if-equal
 
 
-    allowed-in-sysex_     -> bool:  return type >= SYSEX-END
-    allowed-outside-sysex_-> bool:  return type != SYSEX-DATA and type != SYSEX-END
+
+/** Message subclass for $SYSEX-BEGIN messages, which have a vendor identifier. */
+class SysexMessage extends Message:
+    /** MIDI Vendor ID: either one nonzero byte, or three bytes the first of which is zero. */
+    vendor /ByteArray
+
+    constructor .vendor/ByteArray --time=Time.now:
+        super SYSEX-BEGIN --time=time
+        if not ((vendor.size == 1 and vendor[0] == 0) or (vendor.size == 3 and vendor[0] == 0)):
+            throw "Invalid MIDI vendor ID"
+
+    copy -> SysexMessage:
+        return SysexMessage vendor --time=time
+
+    write-to out/writer.Writer:
+        out.write-byte SYSEX-BEGIN
+        out.write vendor
+
+    stringify -> string:
+        return super.stringify + " $vendor"
 
 
-    /** A mapping from message types to names. */
-    static NAMES_ ::= {
-        NOTE-OFF:       "NOTE-OFF",
-        NOTE-ON:        "NOTE-ON",
-        POLY-AFTERTOUCH:"POLY-AFTERTOUCH",
-        CC:             "CC",
-        PROGRAM-CHANGE: "PROGRAM-CHANGE",
-        CHANNEL-PRESSURE:"CHANNEL-PRESSURE",
-        PITCH-BEND:     "PITCH-BEND",
-        SYSEX-BEGIN:    "SYSEX-BEGIN",
-        QUARTER-FRAME:  "QUARTER-FRAME",
-        SONG-POSITION:  "SONG-POSITION",
-        SONG-SELECT:    "SONG-SELECT",
-        TUNE-REQUEST:   "TUNE-REQUEST",
-        SYSEX-END:      "SYSEX-END",
-        TIMING-CLOCK:   "TIMING-CLOCK",
-        START:          "START",
-        CONTINUE:       "CONTINUE",
-        STOP:           "STOP",
-        ACTIVE-SENSING: "ACTIVE-SENSING",
-        RESET:          "RESET",
-        SYSEX-DATA:     "SYSEX-DATA"
-    }
 
-read-data-byte_ in/reader.Reader -> int:
-    b := in.read-byte
-    if b >= 0x80: throw "received invalid MIDI data byte $(%02x b)"
-    return b
+/** Message subclass for Sysex data, which occurs after a $SYSEX-BEGIN and before a $SYSEX-END. */
+class SysexDataMessage extends Message:
+    /** Binary data, part of a Sysex dump. All bytes must be <= 0x7F. */
+    data /ByteArray
 
-write-data-byte_ out/writer.Writer b/int:
-    if b < 0 or b >= 0x80: throw "invalid MIDI parameter (out of range 0..127)"
-    out.write-byte b
+    constructor .data/ByteArray --time=Time.now:
+        super SYSEX-DATA --time=time
+
+    copy -> SysexDataMessage:
+        return SysexDataMessage data --time=time
+
+    write-to out/writer.Writer:
+        out.write data
+
+    stringify -> string:
+        return super.stringify + " $data.size bytes"
+
+
+write-data-byte_ out/writer.Writer status/int:
+    if status < 0 or status >= 0x80: throw "invalid MIDI parameter (out of range 0..127)"
+    out.write-byte status
+
+
+/** A mapping from message types to names. */
+NAMES_ ::= {
+    NOTE-OFF:           "NOTE-OFF",
+    NOTE-ON:            "NOTE-ON",
+    POLY-AFTERTOUCH:    "POLY-AFTERTOUCH",
+    CC:                 "CC",
+    PROGRAM-CHANGE:     "PROGRAM-CHANGE",
+    CHANNEL-PRESSURE:   "CHANNEL-PRESSURE",
+    PITCH-BEND:         "PITCH-BEND",
+
+    SOUND-OFF:          "SOUND-OFF",
+    RESET-CONTROLLERS:  "RESET-CONTROLLERS",
+    LOCAL-CONTROL:      "LOCAL-CONTROL",
+    NOTES-OFF:          "NOTES-OFF",
+    OMNI-OFF:           "OMNI-OFF",
+    OMNI-ON:            "OMNI-ON",
+    MONO-MODE:          "MONO-MODE",
+    POLY-MODE:          "POLY-MODE",
+
+    SYSEX-BEGIN:        "SYSEX-BEGIN",
+    QUARTER-FRAME:      "QUARTER-FRAME",
+    SONG-POSITION:      "SONG-POSITION",
+    SONG-SELECT:        "SONG-SELECT",
+    TUNE-REQUEST:       "TUNE-REQUEST",
+    SYSEX-END:          "SYSEX-END",
+    SYSEX-DATA:         "SYSEX-DATA",
+
+    TIMING-CLOCK:       "TIMING-CLOCK",
+    START:              "START",
+    CONTINUE:           "CONTINUE",
+    STOP:               "STOP",
+    ACTIVE-SENSING:     "ACTIVE-SENSING",
+    RESET:              "RESET",
+}
